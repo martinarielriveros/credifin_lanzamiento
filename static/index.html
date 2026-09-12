@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credifin | Visualizador de Rutas</title>
+  
+  <!-- Modern Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome 6 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/static/css/style.css?v=6">
+</head>
+<body>
+
+  <!-- Main Application Wrapper -->
+  <div class="app-layout">
+    
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-badge">
+          <i class="fa-solid fa-route"></i>
+        </div>
+        <div>
+          <h1 class="brand-title">Credifin <span class="brand-sub">Rutas</span></h1>
+          <p class="brand-caption">Visualizador & Gestor de Trazabilidad Logística</p>
+        </div>
+      </div>
+
+      <!-- Quick Stats Pills -->
+      <div class="stats-pills" id="stats-pills">
+        <div class="stat-pill" title="Total de Rutas Cargadas">
+          <i class="fa-solid fa-arrow-progress"></i>
+          <span class="stat-label">Rutas:</span>
+          <span class="stat-val" id="stat-routes">0</span>
+        </div>
+        <div class="stat-pill" title="Grupos Operativos">
+          <i class="fa-solid fa-layer-group"></i>
+          <span class="stat-label">Grupos:</span>
+          <span class="stat-val" id="stat-groups">0</span>
+        </div>
+        <div class="stat-pill" title="Nodos y Ciudades">
+          <i class="fa-solid fa-city"></i>
+          <span class="stat-label">Ciudades:</span>
+          <span class="stat-val" id="stat-cities">0</span>
+        </div>
+        <div class="stat-pill" title="Kilómetros de Red">
+          <i class="fa-solid fa-road"></i>
+          <span class="stat-label">Total Km:</span>
+          <span class="stat-val" id="stat-km">0 km</span>
+        </div>
+      </div>
+
+      <!-- Actions Bar -->
+      <div class="header-actions">
+        <button id="btn-open-upload" class="btn btn-primary" title="Subir archivo CSV de rutas">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+          <span>Subir CSV</span>
+        </button>
+        <button id="btn-load-sample" class="btn btn-secondary" title="Cargar rutas de ejemplo">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
+          <span>Ejemplo</span>
+        </button>
+        <a href="/api/download-template" class="btn btn-ghost" title="Descargar plantilla CSV oficial">
+          <i class="fa-solid fa-file-csv"></i>
+          <span>Plantilla</span>
+        </a>
+        <button id="btn-clear-routes" class="btn btn-danger-ghost" title="Limpiar todas las rutas cargadas">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace: Map & Floating Overlays -->
+    <main class="map-workspace">
+      <!-- Leaflet Map Canvas -->
+      <div id="map"></div>
+
+      <!-- Floating Group Selector Overlay (Requested User Feature) -->
+      <div class="floating-overlay group-selector-card" id="group-selector-overlay">
+        <div class="card-header">
+          <div class="header-left">
+            <span class="card-icon"><i class="fa-solid fa-filter"></i></span>
+            <span class="card-title">Filtro por Grupo</span>
+          </div>
+          <button id="btn-toggle-all-groups" class="tag-btn" title="Alternar todos">Todos</button>
+        </div>
+
+        <div class="group-selector-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="group-search-input" placeholder="Buscar grupo..." autocomplete="off">
+        </div>
+
+        <div class="group-list-container" id="group-list-container">
+          <!-- Groups rendered dynamically here -->
+          <div class="loading-placeholder">
+            <i class="fa-solid fa-circle-notch fa-spin"></i> Cargando grupos...
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <span id="active-groups-summary">0 de 0 grupos activos</span>
+          <button id="btn-fit-visible" class="btn-micro" title="Enfocar rutas visibles">
+            <i class="fa-solid fa-expand"></i> Centrar
+          </button>
+        </div>
+      </div>
+
+      <!-- Floating Map Controls (Layer Switcher) -->
+      <div class="floating-overlay map-top-controls">
+        <!-- Layer Style Switcher -->
+        <div class="style-switcher-group">
+          <button class="style-btn active" data-style="dark" title="Modo Oscuro Canvas">
+            <i class="fa-solid fa-moon"></i>
+          </button>
+          <button class="style-btn" data-style="voyager" title="Modo Calles (Esri)">
+            <i class="fa-solid fa-sun"></i>
+          </button>
+          <button class="style-btn" data-style="osm" title="Mapa Estándar OSM">
+            <i class="fa-solid fa-map"></i>
+          </button>
+          <button class="style-btn" data-style="satellite" title="Modo Satélite">
+            <i class="fa-solid fa-earth-americas"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Floating Route Explorer Drawer Toggle & Panel -->
+      <div class="route-explorer-drawer" id="route-explorer-drawer">
+        <div class="drawer-header" id="drawer-header">
+          <div class="drawer-title-area">
+            <i class="fa-solid fa-compass"></i>
+            <span>Explorador de Rutas (<span id="visible-routes-count">0</span>)</span>
+          </div>
+          <button id="drawer-toggle-btn" class="drawer-arrow" title="Minimizar / Expandir panel">
+            <i class="fa-solid fa-chevron-up"></i>
+          </button>
+        </div>
+
+        <div class="drawer-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="route-search-input" placeholder="Filtrar por ciudad origen o destino...">
+        </div>
+
+        <div class="drawer-body" id="route-list-body">
+          <!-- Route items rendered dynamically -->
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- CSV Upload Modal -->
+  <div class="modal-backdrop" id="upload-modal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon"><i class="fa-solid fa-file-arrow-up"></i></div>
+          <div>
+            <h3>Importar Rutas desde CSV</h3>
+            <p>Soporta formato con o sin coordenadas lat/long predefinidas</p>
+          </div>
+        </div>
+        <button class="modal-close" id="btn-close-modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="csv-specs-alert">
+          <i class="fa-solid fa-circle-info"></i>
+          <div>
+            <strong>Columnas requeridas:</strong>
+            <code>Grupo</code>, <code>Ciudad 1</code>, <code>Provincia-Ciudad1</code>, <code>Ciudad2</code>.
+            <br>
+            <small>Las coordenadas (lat/long) de la Ciudad 1 y Ciudad 2 se geolocalizan automáticamente y se persisten en SQLite.</small>
+          </div>
+        </div>
+
+        <!-- Hidden File Input -->
+        <input type="file" id="csv-file-input" accept=".csv, text/csv, text/plain" style="display:none;">
+
+        <!-- Dropzone Area -->
+        <div class="dropzone" id="csv-dropzone">
+          <div class="dropzone-icon">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+          </div>
+          <h4 id="dropzone-title">Arrastra y suelta tu archivo CSV aquí</h4>
+          <p id="dropzone-desc">o haz clic para explorar en tu computadora</p>
+          <div class="selected-file-pill" id="selected-file-pill" style="display:none;">
+            <i class="fa-solid fa-file-lines"></i>
+            <span id="selected-filename">archivo.csv</span>
+            <button type="button" id="btn-remove-selected-file">&times;</button>
+          </div>
+        </div>
+
+        <!-- Import Mode Option -->
+        <div class="upload-options">
+          <label class="radio-label">
+            <input type="radio" name="upload-mode" value="replace" checked>
+            <span>Reemplazar rutas existentes en base de datos</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="upload-mode" value="append">
+            <span>Agregar a las rutas existentes</span>
+          </label>
+        </div>
+
+        <div id="upload-feedback" class="upload-feedback" style="display:none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-submit-upload" disabled>
+          <i class="fa-solid fa-upload"></i> Procesar y Visualizar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- App Scripts -->
+  <script src="/static/js/api.js?v=7"></script>
+  <script src="/static/js/map.js?v=7"></script>
+  <script src="/static/js/app.js?v=7"></script>
+</body>
+</html>
