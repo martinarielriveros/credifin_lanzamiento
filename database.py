@@ -24,9 +24,16 @@ def init_db():
         lon2 REAL NOT NULL,
         distance_km REAL DEFAULT 0,
         geometry_json TEXT,
+        total_packages INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+
+    # Migration: ensure total_packages exists in existing table
+    cursor.execute("PRAGMA table_info(routes)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "total_packages" not in columns:
+        cursor.execute("ALTER TABLE routes ADD COLUMN total_packages INTEGER DEFAULT 0")
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS geocache (
@@ -63,9 +70,10 @@ def insert_routes_bulk(routes: List[Dict[str, Any]]) -> int:
     inserted = 0
     for r in routes:
         geometry_str = json.dumps(r.get("geometry", []))
+        total_pkgs = int(r.get("total_packages", 0) or 0)
         cursor.execute("""
-        INSERT INTO routes (grupo, ciudad1, provincia1, ciudad2, lat1, lon1, lat2, lon2, distance_km, geometry_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO routes (grupo, ciudad1, provincia1, ciudad2, lat1, lon1, lat2, lon2, distance_km, geometry_json, total_packages)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             r.get("grupo", "General").strip(),
             r.get("ciudad1", "").strip(),
@@ -76,7 +84,8 @@ def insert_routes_bulk(routes: List[Dict[str, Any]]) -> int:
             float(r.get("lat2", 0)),
             float(r.get("lon2", 0)),
             round(float(r.get("distance_km", 0)), 1),
-            geometry_str
+            geometry_str,
+            total_pkgs
         ))
         inserted += 1
         
@@ -116,12 +125,12 @@ def get_groups() -> List[Dict[str, Any]]:
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
-    SELECT grupo, COUNT(*) as count 
+    SELECT grupo, COUNT(*) as count, COALESCE(SUM(total_packages), 0) as total_packages
     FROM routes 
     GROUP BY grupo 
     ORDER BY count DESC, grupo ASC
     """)
-    groups = [{"grupo": row["grupo"], "count": row["count"]} for row in cursor.fetchall()]
+    groups = [{"grupo": row["grupo"], "count": row["count"], "total_packages": row["total_packages"]} for row in cursor.fetchall()]
     conn.close()
     return groups
 
@@ -147,13 +156,17 @@ def get_stats() -> Dict[str, Any]:
     
     cursor.execute("SELECT COALESCE(SUM(distance_km), 0) FROM routes")
     total_km = round(cursor.fetchone()[0], 1)
+
+    cursor.execute("SELECT COALESCE(SUM(total_packages), 0) FROM routes")
+    total_packages = int(cursor.fetchone()[0])
     
     conn.close()
     return {
         "total_routes": total_routes,
         "total_groups": total_groups,
         "total_cities": total_cities,
-        "total_km": total_km
+        "total_km": total_km,
+        "total_packages": total_packages
     }
 
 def get_cached_route(lat1: float, lon1: float, lat2: float, lon2: float) -> Optional[tuple]:

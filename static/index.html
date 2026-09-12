@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="/static/css/style.css?v=6">
+  <link rel="stylesheet" href="/static/css/style.css?v=10">
 </head>
 <body>
 
@@ -43,6 +43,11 @@
           <span class="stat-label">Rutas:</span>
           <span class="stat-val" id="stat-routes">0</span>
         </div>
+        <div class="stat-pill" title="Total de Bultos / Paquetes">
+          <i class="fa-solid fa-boxes-stacked"></i>
+          <span class="stat-label">Bultos:</span>
+          <span class="stat-val" id="stat-packages">0</span>
+        </div>
         <div class="stat-pill" title="Grupos Operativos">
           <i class="fa-solid fa-layer-group"></i>
           <span class="stat-label">Grupos:</span>
@@ -62,6 +67,10 @@
 
       <!-- Actions Bar -->
       <div class="header-actions">
+        <button id="btn-sync-sheet" class="btn btn-secondary" title="Sincronizar datos y bultos desde Google Sheet (Desagregado)">
+          <i class="fa-solid fa-rotate"></i>
+          <span>Sincronizar Sheet</span>
+        </button>
         <button id="btn-open-upload" class="btn btn-primary" title="Subir archivo CSV de rutas">
           <i class="fa-solid fa-cloud-arrow-up"></i>
           <span>Subir CSV</span>
@@ -87,72 +96,150 @@
 
       <!-- Floating Group Selector Overlay (Requested User Feature) -->
       <div class="floating-overlay group-selector-card" id="group-selector-overlay">
-        <div class="card-header">
+        <div class="card-header draggable-header" id="group-selector-header" title="Arrastrar para mover">
           <div class="header-left">
+            <span class="drag-grip-icon" title="Arrastrar"><i class="fa-solid fa-grip-vertical"></i></span>
             <span class="card-icon"><i class="fa-solid fa-filter"></i></span>
             <span class="card-title">Filtro por Grupo</span>
           </div>
-          <button id="btn-toggle-all-groups" class="tag-btn" title="Alternar todos">Todos</button>
-        </div>
-
-        <div class="group-selector-search">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" id="group-search-input" placeholder="Buscar grupo..." autocomplete="off">
-        </div>
-
-        <div class="group-list-container" id="group-list-container">
-          <!-- Groups rendered dynamically here -->
-          <div class="loading-placeholder">
-            <i class="fa-solid fa-circle-notch fa-spin"></i> Cargando grupos...
+          <div class="header-right-actions">
+            <button id="btn-toggle-all-groups" class="tag-btn" title="Alternar todos">Todos</button>
+            <button id="btn-collapse-group-selector" class="window-collapse-btn" title="Minimizar / Expandir panel">
+              <i class="fa-solid fa-chevron-up"></i>
+            </button>
           </div>
         </div>
 
-        <div class="card-footer">
-          <span id="active-groups-summary">0 de 0 grupos activos</span>
-          <button id="btn-fit-visible" class="btn-micro" title="Enfocar rutas visibles">
-            <i class="fa-solid fa-expand"></i> Centrar
-          </button>
+        <div class="window-collapsible-content" id="group-selector-content">
+          <div class="group-selector-search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="group-search-input" placeholder="Buscar grupo..." autocomplete="off">
+          </div>
+
+          <div class="group-list-container" id="group-list-container">
+            <!-- Groups rendered dynamically here -->
+            <div class="loading-placeholder">
+              <i class="fa-solid fa-circle-notch fa-spin"></i> Cargando grupos...
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <span id="active-groups-summary">0 de 0 grupos activos</span>
+            <button id="btn-fit-visible" class="btn-micro" title="Enfocar rutas visibles">
+              <i class="fa-solid fa-expand"></i> Centrar
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- Floating Map Controls (Layer Switcher) -->
-      <div class="floating-overlay map-top-controls">
-        <!-- Layer Style Switcher -->
-        <div class="style-switcher-group">
-          <button class="style-btn active" data-style="dark" title="Modo Oscuro Canvas">
-            <i class="fa-solid fa-moon"></i>
+      <!-- Floating Map Controls (Toggle Values + Layer Switcher) -->
+      <div class="floating-overlay map-top-controls draggable-header" id="map-top-controls" title="Arrastrar barra de controles">
+        <span class="drag-grip-icon toolbar-drag" title="Arrastrar"><i class="fa-solid fa-grip-vertical"></i></span>
+
+        <div class="map-controls-content">
+          <!-- Toggle Trajectory Values (Bultos) Mark -->
+          <button id="btn-toggle-values" class="control-toggle-btn active" title="Mostrar / Ocultar etiquetas de totales y bultos en cada trayectoria">
+            <i class="fa-solid fa-tags"></i>
+            <span>Totales</span>
+            <span class="toggle-pill-status">ON</span>
           </button>
-          <button class="style-btn" data-style="voyager" title="Modo Calles (Esri)">
-            <i class="fa-solid fa-sun"></i>
+
+          <!-- Toggle Heat Map Layer -->
+          <button id="btn-toggle-heatmap" class="control-toggle-btn" title="Activar / Desactivar Mapa de Calor continuo por densidad de bultos">
+            <i class="fa-solid fa-fire-flame-curved"></i>
+            <span>Mapa de Calor</span>
+            <span class="toggle-pill-status off">OFF</span>
           </button>
-          <button class="style-btn" data-style="osm" title="Mapa Estándar OSM">
-            <i class="fa-solid fa-map"></i>
+
+          <!-- Toggle Color Mode (Total vs Grupo) -->
+          <button id="btn-toggle-colormode" class="control-toggle-btn active" title="Alternar coloreado de rutas: Por Total (5 Bandas) o Por Grupo">
+            <i class="fa-solid fa-palette"></i>
+            <span id="colormode-label">Color: Total (5B)</span>
           </button>
-          <button class="style-btn" data-style="satellite" title="Modo Satélite">
-            <i class="fa-solid fa-earth-americas"></i>
-          </button>
+
+          <div class="toolbar-separator"></div>
+
+          <!-- Layer Style Switcher -->
+          <div class="style-switcher-group">
+            <button class="style-btn active" data-style="dark" title="Modo Oscuro Canvas">
+              <i class="fa-solid fa-moon"></i>
+            </button>
+            <button class="style-btn" data-style="voyager" title="Modo Calles (Esri)">
+              <i class="fa-solid fa-sun"></i>
+            </button>
+            <button class="style-btn" data-style="osm" title="Mapa Estándar OSM">
+              <i class="fa-solid fa-map"></i>
+            </button>
+            <button class="style-btn" data-style="satellite" title="Modo Satélite">
+              <i class="fa-solid fa-earth-americas"></i>
+            </button>
+          </div>
+        </div>
+
+        <button id="btn-collapse-map-controls" class="window-collapse-btn" title="Minimizar / Expandir controles">
+          <i class="fa-solid fa-chevron-up"></i>
+        </button>
+      </div>
+
+      <!-- Floating 5-Band Total Legend Card (Mapa de Color) -->
+      <div class="floating-overlay total-legend-card" id="total-legend-overlay">
+        <div class="card-header draggable-header" id="total-legend-header" title="Arrastrar panel de colores">
+          <div class="header-left">
+            <span class="drag-grip-icon" title="Arrastrar"><i class="fa-solid fa-grip-vertical"></i></span>
+            <span class="card-icon flame-icon"><i class="fa-solid fa-palette"></i></span>
+            <span class="card-title">Mapa de Color</span>
+          </div>
+          <div class="header-right-actions">
+            <button id="btn-reset-band-filter" class="tag-btn" style="display:none;" title="Mostrar todas las bandas">Ver Todas</button>
+            <button id="btn-collapse-total-legend" class="window-collapse-btn" title="Minimizar / Expandir leyenda">
+              <i class="fa-solid fa-chevron-up"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="window-collapsible-content" id="total-legend-content">
+          <!-- Active Filter Alert Banner -->
+          <div class="legend-filter-banner" id="legend-filter-banner" style="display:none;">
+            <div class="banner-left">
+              <span class="banner-dot" id="banner-dot"></span>
+              <span class="banner-text">Mostrando solo: <strong id="banner-color-name">Rojo</strong></span>
+            </div>
+            <button id="btn-clear-color-banner" class="banner-clear-btn" title="Mostrar todas las rutas">&times; Todas</button>
+          </div>
+
+          <div class="legend-subtitle">Selecciona un color para ver únicamente sus rutas:</div>
+          <div class="legend-bands-list" id="legend-bands-list">
+            <!-- Rendered dynamically -->
+          </div>
+          <div class="legend-footer">
+            <span id="legend-total-summary">Cargando rangos...</span>
+            <span class="legend-tip">Clic para aislar color</span>
+          </div>
         </div>
       </div>
 
       <!-- Floating Route Explorer Drawer Toggle & Panel -->
       <div class="route-explorer-drawer" id="route-explorer-drawer">
-        <div class="drawer-header" id="drawer-header">
+        <div class="drawer-header draggable-header" id="drawer-header" title="Arrastrar para mover">
           <div class="drawer-title-area">
+            <span class="drag-grip-icon" title="Arrastrar"><i class="fa-solid fa-grip-vertical"></i></span>
             <i class="fa-solid fa-compass"></i>
             <span>Explorador de Rutas (<span id="visible-routes-count">0</span>)</span>
           </div>
-          <button id="drawer-toggle-btn" class="drawer-arrow" title="Minimizar / Expandir panel">
+          <button id="drawer-toggle-btn" class="drawer-arrow window-collapse-btn" title="Minimizar / Expandir panel">
             <i class="fa-solid fa-chevron-up"></i>
           </button>
         </div>
 
-        <div class="drawer-search">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" id="route-search-input" placeholder="Filtrar por ciudad origen o destino...">
-        </div>
+        <div class="window-collapsible-content" id="route-explorer-content">
+          <div class="drawer-search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="route-search-input" placeholder="Filtrar por ciudad origen o destino...">
+          </div>
 
-        <div class="drawer-body" id="route-list-body">
-          <!-- Route items rendered dynamically -->
+          <div class="drawer-body" id="route-list-body">
+            <!-- Route items rendered dynamically -->
+          </div>
         </div>
       </div>
     </main>
@@ -229,10 +316,12 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Leaflet Heat Plugin -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   
   <!-- App Scripts -->
-  <script src="/static/js/api.js?v=7"></script>
-  <script src="/static/js/map.js?v=7"></script>
-  <script src="/static/js/app.js?v=7"></script>
+  <script src="/static/js/api.js?v=10"></script>
+  <script src="/static/js/map.js?v=10"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>

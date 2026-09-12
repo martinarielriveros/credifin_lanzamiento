@@ -53,5 +53,13 @@ const API = {
     const resp = await fetch('/api/routes', { method: 'DELETE' });
     if (!resp.ok) throw new Error('Error al limpiar rutas');
     return await resp.json();
+  },
+
+  async syncGoogleSheet(sheetUrl = null) {
+    const url = sheetUrl ? `/api/sync-google-sheet?sheet_url=${encodeURIComponent(sheetUrl)}` : '/api/sync-google-sheet';
+    const resp = await fetch(url, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Error al sincronizar con Google Sheets');
+    return data;
   }
 };

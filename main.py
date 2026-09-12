@@ -90,11 +90,19 @@ def preview_csv_content(content_str: str) -> Dict[str, Any]:
         key_lon1 = find_matched_key(clean_row, ["lon1", "longitude1", "lng1", "lon_origen", "lng_origen"])
         key_lat2 = find_matched_key(clean_row, ["lat2", "latitude2", "lat_destino", "latdestino"])
         key_lon2 = find_matched_key(clean_row, ["lon2", "longitude2", "lng2", "lon_destino", "lngdestino"])
+        key_total = find_matched_key(clean_row, ["total", "bultos", "paquetes", "cantidad", "packages"])
 
         grupo = (clean_row.get(key_grupo) if key_grupo else "") or "General"
         ciudad1 = (clean_row.get(key_c1) if key_c1 else "").strip()
         provincia1 = (clean_row.get(key_p1) if key_p1 else "").strip()
         ciudad2 = (clean_row.get(key_c2) if key_c2 else "").strip()
+
+        total_packages = 0
+        if key_total and clean_row.get(key_total):
+            try:
+                total_packages = int(float(clean_row[key_total]))
+            except ValueError:
+                total_packages = 0
 
         # Fallback to positional if headers were unmapped
         if not ciudad1 or not ciudad2:
@@ -161,6 +169,7 @@ def preview_csv_content(content_str: str) -> Dict[str, Any]:
             "ciudad1": ciudad1,
             "provincia1": provincia1,
             "ciudad2": ciudad2,
+            "total_packages": total_packages,
             "exact_combination_found": is_exact,
             "match_type": match_type,
             "match_details": exact_eval["details"],
@@ -219,11 +228,19 @@ def process_csv_content(content_str: str) -> list:
         key_lon1 = find_matched_key(clean_row, ["lon1", "longitude1", "lng1", "lon_origen", "lng_origen"])
         key_lat2 = find_matched_key(clean_row, ["lat2", "latitude2", "lat_destino", "latdestino"])
         key_lon2 = find_matched_key(clean_row, ["lon2", "longitude2", "lng2", "lon_destino", "lngdestino"])
+        key_total = find_matched_key(clean_row, ["total", "bultos", "paquetes", "cantidad", "packages"])
 
         grupo = (clean_row.get(key_grupo) if key_grupo else "") or "General"
         ciudad1 = (clean_row.get(key_c1) if key_c1 else "").strip()
         provincia1 = (clean_row.get(key_p1) if key_p1 else "").strip()
         ciudad2 = (clean_row.get(key_c2) if key_c2 else "").strip()
+
+        total_packages = 0
+        if key_total and clean_row.get(key_total):
+            try:
+                total_packages = int(float(clean_row[key_total]))
+            except ValueError:
+                total_packages = 0
 
         if not ciudad1 or not ciudad2:
             vals = list(clean_row.values())
@@ -274,7 +291,8 @@ def process_csv_content(content_str: str) -> list:
             "lat1": lat1,
             "lon1": lon1,
             "lat2": lat2,
-            "lon2": lon2
+            "lon2": lon2,
+            "total_packages": total_packages
         })
 
     def resolve_item(item):
@@ -289,7 +307,8 @@ def process_csv_content(content_str: str) -> list:
             "lat2": item["lat2"],
             "lon2": item["lon2"],
             "distance_km": dist_km,
-            "geometry": geometry
+            "geometry": geometry,
+            "total_packages": item.get("total_packages", 0)
         }
 
     with ThreadPoolExecutor(max_workers=6) as executor:
@@ -416,6 +435,82 @@ def download_template():
         media_type="text/csv",
         filename="plantilla_rutas_credifin.csv"
     )
+
+@app.post("/api/sync-google-sheet")
+def sync_google_sheet(sheet_url: Optional[str] = Query(None)):
+    """
+    Downloads Google Sheet ("Desagregado" tab), extracts 'Total' (column G / packages),
+    and updates each matching pair (ciudad1, ciudad2) in SQLite.
+    """
+    import requests
+    import unicodedata
+
+    url = sheet_url or "https://docs.google.com/spreadsheets/d/10jzm2zFFNseYA6xBD9b2wRB06Iu4xLJrMHAlD9FB4jM/export?format=csv&gid=0"
+    if "/edit" in url:
+        match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+        if match:
+            sheet_id = match.group(1)
+            gid_match = re.search(r"gid=([0-9]+)", url)
+            gid = gid_match.group(1) if gid_match else "0"
+            url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+
+    try:
+        resp = requests.get(url, timeout=12)
+        resp.raise_for_status()
+
+        def nrm(s):
+            if not s:
+                return ""
+            norm_str = unicodedata.normalize('NFKD', str(s)).encode('ASCII', 'ignore').decode('utf-8').lower()
+            norm_str = re.sub(r'[^\w\s]', ' ', norm_str)
+            return re.sub(r'\s+', ' ', norm_str).strip()
+
+        reader = list(csv.DictReader(io.StringIO(resp.text)))
+        sheet_data = {}
+        for r in reader:
+            o = nrm(r.get("Origen") or r.get("Ciudad 1") or r.get("Ciudad1") or "")
+            d = nrm(r.get("Destino") or r.get("Ciudad2") or r.get("Ciudad 2") or "")
+            tot_raw = r.get("Total") or r.get("total") or r.get("Bultos") or "0"
+            try:
+                tot = int(float(str(tot_raw).strip())) if str(tot_raw).strip() else 0
+            except ValueError:
+                tot = 0
+            if o and d:
+                sheet_data[(o, d)] = tot
+
+        conn = database.get_db()
+        cursor = conn.cursor()
+        routes = cursor.execute("SELECT id, ciudad1, ciudad2 FROM routes").fetchall()
+        updated_count = 0
+        for r in routes:
+            rid = r["id"]
+            c1 = nrm(r["ciudad1"])
+            c2 = nrm(r["ciudad2"])
+            if (c1, c2) in sheet_data:
+                cursor.execute("UPDATE routes SET total_packages = ? WHERE id = ?", (sheet_data[(c1, c2)], rid))
+                updated_count += 1
+            else:
+                for (so, sd), val in sheet_data.items():
+                    if (so in c1 or c1 in so) and (sd in c2 or c2 in sd):
+                        cursor.execute("UPDATE routes SET total_packages = ? WHERE id = ?", (val, rid))
+                        updated_count += 1
+                        break
+
+        conn.commit()
+        conn.close()
+
+        stats = database.get_stats()
+        groups = database.get_groups()
+
+        return {
+            "success": True,
+            "message": f"Se sincronizaron los valores de {updated_count} rutas desde la planilla Google Drive.",
+            "updated_count": updated_count,
+            "stats": stats,
+            "groups": groups
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al sincronizar planilla: {str(e)}")
 
 # Mount static folder
 static_dir = os.path.join(os.path.dirname(__file__), "static")
