@@ -13,14 +13,25 @@ class RoutesMap {
     // Layers storage
     this.routeLayers = []; // { id, grupo, polyline, valMarker, valCoord, route, isVisible, originKey, destKey, band }
     this.cityMarkers = new Map(); // key -> { marker, cityData, isVisible }
-    this.showValues = true; // Toggle for showing package quantities on trajectories (ON by default)
+    this.showValues = false; // Toggle for showing package quantities on trajectories (OFF by default)
     this.selectedRouteId = null; // Currently selected route ID
     this.highlightColor = '#FFE600'; // High-contrast electric yellow highlight color
     
     // Color Mode: 'total' (default 5 bands) or 'group'
     this.colorMode = 'total';
     this.totalBands = [];
-    this.activeBandIndex = null; // null = all bands visible, or 0..4 for filtering
+    this.activeBandIndex = null; // For legacy/single-band compatibility
+    this.activeBands = new Set(); // Multi-color selection: Set of band indices (0..4) and/or 'custom'
+    this.customBandLimits = null; // { b1, b2, b4 } customized thresholds
+    this.bandLimits = { b1: 5, b2: 15, b4: 45 }; // Currently active limits
+    this.customFilterCategory = {
+      min: 10,
+      max: 100,
+      color: '#A855F7',
+      colorName: 'Púrpura',
+      label: 'Personalizado',
+      count: 0
+    };
     
     // Heat Map
     this.showHeatmap = false;
@@ -133,52 +144,65 @@ class RoutesMap {
    * Band 0 (Sin bultos / Mín):   #06B6D4 (Cyan / Blue)
    */
   computeTotalBands(routes) {
-    if (!routes || routes.length === 0) {
-      this.totalBands = [
-        { index: 0, label: 'Sin bultos', rangeText: '0 bultos', min: 0, max: 0, color: '#06B6D4', count: 0 },
-        { index: 1, label: 'Bajo', rangeText: '1 - 5 bultos', min: 1, max: 5, color: '#10B981', count: 0 },
-        { index: 2, label: 'Medio', rangeText: '6 - 15 bultos', min: 6, max: 15, color: '#FACC15', count: 0 },
-        { index: 3, label: 'Alto', rangeText: '16 - 45 bultos', min: 16, max: 45, color: '#F97316', count: 0 },
-        { index: 4, label: 'Crítico', rangeText: '> 45 bultos', min: 46, max: Infinity, color: '#EF4444', count: 0 }
-      ];
-      return this.totalBands;
-    }
+    let b1, b2, b4;
 
-    const vals = routes.map(r => Number(r.total_packages || 0));
-    const positiveVals = vals.filter(v => v > 0).sort((a, b) => a - b);
-
-    let b1, b2, b3, b4;
-    if (positiveVals.length >= 6) {
-      // 4 natural breakpoints across positive shipping totals
-      const q1 = positiveVals[Math.floor(positiveVals.length * 0.25)];
-      const q2 = positiveVals[Math.floor(positiveVals.length * 0.50)];
-      const q3 = positiveVals[Math.floor(positiveVals.length * 0.75)];
-      const q4 = positiveVals[Math.floor(positiveVals.length * 0.90)];
-
-      b1 = Math.max(1, q1);
-      b2 = Math.max(b1 + 1, q2);
-      b3 = Math.max(b2 + 1, q3);
-      b4 = Math.max(b3 + 1, q4);
+    if (this.customBandLimits) {
+      b1 = Math.max(1, Number(this.customBandLimits.b1));
+      b2 = Math.max(b1 + 1, Number(this.customBandLimits.b2));
+      b4 = Math.max(b2 + 1, Number(this.customBandLimits.b4));
+    } else if (routes && routes.length > 0) {
+      const vals = routes.map(r => Number(r.total_packages || 0));
+      const positiveVals = vals.filter(v => v > 0).sort((a, b) => a - b);
+      if (positiveVals.length >= 6) {
+        const q1 = positiveVals[Math.floor(positiveVals.length * 0.25)];
+        const q2 = positiveVals[Math.floor(positiveVals.length * 0.50)];
+        const q4 = positiveVals[Math.floor(positiveVals.length * 0.85)];
+        b1 = Math.max(1, q1);
+        b2 = Math.max(b1 + 1, q2);
+        b4 = Math.max(b2 + 1, q4);
+      } else if (positiveVals.length > 0) {
+        const minVal = positiveVals[0];
+        const maxVal = positiveVals[positiveVals.length - 1];
+        const span = Math.max(4, maxVal - minVal);
+        b1 = Math.max(1, Math.round(minVal + span * 0.25));
+        b2 = Math.max(b1 + 1, Math.round(minVal + span * 0.50));
+        b4 = Math.max(b2 + 1, Math.round(minVal + span * 0.80));
+      } else {
+        b1 = 5;
+        b2 = 15;
+        b4 = 45;
+      }
     } else {
-      b1 = 3;
-      b2 = 10;
-      b3 = 25;
-      b4 = 50;
+      b1 = 5;
+      b2 = 15;
+      b4 = 45;
     }
+
+    this.bandLimits = { b1, b2, b4 };
 
     this.totalBands = [
       { index: 0, label: 'Sin bultos', rangeText: '0 bultos', min: 0, max: 0, color: '#06B6D4', colorName: 'Cian', count: 0 },
       { index: 1, label: 'Bajo', rangeText: `1 - ${b1} bultos`, min: 1, max: b1, color: '#10B981', colorName: 'Verde', count: 0 },
       { index: 2, label: 'Medio', rangeText: `${b1 + 1} - ${b2} bultos`, min: b1 + 1, max: b2, color: '#FACC15', colorName: 'Amarillo', count: 0 },
       { index: 3, label: 'Alto', rangeText: `${b2 + 1} - ${b4} bultos`, min: b2 + 1, max: b4, color: '#F97316', colorName: 'Naranja', count: 0 },
-      { index: 4, label: 'Crítico', rangeText: `> ${b4} bultos`, min: b4 + 1, max: Infinity, color: '#EF4444', colorName: 'Rojo', count: 0 }
+      { index: 4, label: 'Muy Alto', rangeText: `Desde ${b4 + 1} bultos`, min: b4 + 1, max: Infinity, color: '#EF4444', colorName: 'Rojo', count: 0 }
     ];
 
-    // Compute route count per band
-    routes.forEach(r => {
-      const band = this.getBandForTotal(r.total_packages || 0);
-      band.count++;
-    });
+    if (routes && routes.length > 0) {
+      // Compute route count per band
+      routes.forEach(r => {
+        const band = this.getBandForTotal(r.total_packages || 0);
+        band.count++;
+      });
+
+      // Compute count for custom filter category
+      if (this.customFilterCategory) {
+        this.customFilterCategory.count = routes.filter(r => {
+          const pkgs = Number(r.total_packages || 0);
+          return pkgs >= this.customFilterCategory.min && pkgs <= this.customFilterCategory.max;
+        }).length;
+      }
+    }
 
     return this.totalBands;
   }
@@ -195,6 +219,23 @@ class RoutesMap {
       }
     }
     return this.totalBands[1];
+  }
+
+  /**
+   * Evaluates whether a route matches the currently selected color bands and/or custom category.
+   * If no color filter is selected (activeBands is empty), returns true.
+   */
+  isRouteInActiveBands(route) {
+    if (!this.activeBands || this.activeBands.size === 0) return true;
+    const pkgs = Number(route.total_packages || 0);
+    const standardBand = this.getBandForTotal(pkgs);
+    if (this.activeBands.has(standardBand.index)) return true;
+    if (this.activeBands.has('custom') && this.customFilterCategory) {
+      if (pkgs >= this.customFilterCategory.min && pkgs <= this.customFilterCategory.max) {
+        return true;
+      }
+    }
+    return false;
   }
 
   getColorForRoute(route) {
@@ -531,9 +572,10 @@ class RoutesMap {
   }
 
   buildCityPopupHtml(city, activeGroupsSet = null) {
-    const activeOut = city.outgoing.filter(r => !activeGroupsSet || activeGroupsSet.has(r.grupo));
-    const activeIn = city.incoming.filter(r => !activeGroupsSet || activeGroupsSet.has(r.grupo));
-    const totalActive = activeOut.length + activeIn.length;
+    const hasFilter = activeGroupsSet && activeGroupsSet.size > 0;
+    const activeOut = hasFilter ? city.outgoing.filter(r => activeGroupsSet.has(r.grupo)) : city.outgoing;
+    const activeIn = hasFilter ? city.incoming.filter(r => activeGroupsSet.has(r.grupo)) : city.incoming;
+    const totalCount = activeOut.length + activeIn.length;
 
     // Collect distinct groups
     const groupsSet = new Set();
@@ -557,7 +599,7 @@ class RoutesMap {
             const pkgs = r.total_packages !== undefined ? r.total_packages : 0;
             const band = this.getBandForTotal(pkgs);
             return `
-              <div class="city-route-item" onclick="window.RoutesApp && window.RoutesApp.focusRoute(${r.id})">
+              <div class="city-route-item" onclick="window.RoutesApp && window.RoutesApp.activateAndFocusRoute(${r.id}, '${r.grupo}')">
                 <div class="city-route-header">
                   <span class="city-route-dest">➔ <strong>${r.ciudad2}</strong></span>
                   <span class="city-route-pkgs" style="color: ${band.color}; font-weight:700; font-size:11.5px;">
@@ -588,7 +630,7 @@ class RoutesMap {
             const pkgs = r.total_packages !== undefined ? r.total_packages : 0;
             const band = this.getBandForTotal(pkgs);
             return `
-              <div class="city-route-item" onclick="window.RoutesApp && window.RoutesApp.focusRoute(${r.id})">
+              <div class="city-route-item" onclick="window.RoutesApp && window.RoutesApp.activateAndFocusRoute(${r.id}, '${r.grupo}')">
                 <div class="city-route-header">
                   <span class="city-route-dest">⬅️ Desde <strong>${r.ciudad1}</strong></span>
                   <span class="city-route-pkgs" style="color: ${band.color}; font-weight:700; font-size:11.5px;">
@@ -718,12 +760,19 @@ class RoutesMap {
     });
 
     // 4. Render Road Trajectories (Polylines + Value Tags with 5-Band Colors)
-    routes.forEach(route => {
-      const inGroup = !activeGroupsSet || activeGroupsSet.has(route.grupo);
-      const band = this.getBandForTotal(route.total_packages || 0);
-      const inBand = this.activeBandIndex === null || band.index === this.activeBandIndex;
-      const isVisible = inGroup && inBand;
+    const hasGroupFilter = Boolean(activeGroupsSet && activeGroupsSet.size > 0);
+    const hasColorFilter = Boolean(this.activeBands && this.activeBands.size > 0);
+    const hasAnyFilter = hasGroupFilter || hasColorFilter;
 
+    routes.forEach(route => {
+      let isVisible = false;
+      if (hasAnyFilter) {
+        const matchesGroup = !hasGroupFilter || (activeGroupsSet && activeGroupsSet.has(route.grupo));
+        const matchesColor = !hasColorFilter || this.isRouteInActiveBands(route);
+        isVisible = matchesGroup && matchesColor;
+      }
+
+      const band = this.getBandForTotal(route.total_packages || 0);
       const color = this.getColorForRoute(route);
 
       // Extract geometry along real roads
@@ -757,14 +806,14 @@ class RoutesMap {
 
       // Tooltip with band classification and total packages
       polyline.bindTooltip(`
-        <div class="route-tooltip">
-          <div style="font-weight:800; color:${color}; font-size:11.5px; display:flex; align-items:center; gap:5px;">
-            <span style="width:8px; height:8px; border-radius:50%; background:${color}; display:inline-block;"></span>
-            Banda ${band.index + 1}: ${band.label} (${band.rangeText})
+        <div style="font-family: Outfit, sans-serif; font-size: 12px; line-height: 1.4;">
+          <div style="font-weight: 700; color: #fff; margin-bottom: 2px;">
+            ${route.ciudad1} ➔ ${route.ciudad2}
           </div>
-          <div style="font-size:12.5px; margin: 3px 0;"><strong>${route.ciudad1}</strong> ➔ <strong>${route.ciudad2}</strong></div>
-          <div style="font-size:11px; color:#94A3B8;">Grupo: <span style="color:#CBD5E1; font-weight:600;">${route.grupo}</span> | ${route.distance_km} km</div>
-          <div style="font-size:12px; color:#F59E0B; font-weight:700; margin-top: 3px;">
+          <div style="color: ${color}; font-size: 11px; font-weight: 600;">
+            Grupo: ${route.grupo} · Cat: ${band.label} (${band.colorName})
+          </div>
+          <div style="color: #94A3B8; font-size: 11px;">
             <i class="fa-solid fa-boxes-stacked"></i> Total: <strong>${pkgs}</strong> bultos
           </div>
         </div>
@@ -814,15 +863,35 @@ class RoutesMap {
 
     // 5. Render Deduplicated Unique City Markers
     citiesMap.forEach((city, key) => {
-      const activeOut = city.outgoing.filter(r => (!activeGroupsSet || activeGroupsSet.has(r.grupo)) && (this.activeBandIndex === null || this.getBandForTotal(r.total_packages).index === this.activeBandIndex));
-      const activeIn = city.incoming.filter(r => (!activeGroupsSet || activeGroupsSet.has(r.grupo)) && (this.activeBandIndex === null || this.getBandForTotal(r.total_packages).index === this.activeBandIndex));
-      const activeCount = activeOut.length + activeIn.length;
-      const isVisible = activeCount > 0;
+      let isVisible = false;
+      let displayCount = 0;
+      let primaryColor = '#6366F1';
 
-      const firstRoute = activeOut[0] || activeIn[0] || city.outgoing[0] || city.incoming[0];
-      const primaryColor = firstRoute ? this.getColorForRoute(firstRoute) : '#6366F1';
+      if (!hasAnyFilter) {
+        // App start / no filters: all cities visible
+        isVisible = true;
+        displayCount = city.outgoing.length + city.incoming.length;
+      } else {
+        // Filter applied: only cities involved in active routes are visible
+        const activeOut = city.outgoing.filter(r => {
+          const matchesGroup = !hasGroupFilter || (activeGroupsSet && activeGroupsSet.has(r.grupo));
+          const matchesColor = !hasColorFilter || this.isRouteInActiveBands(r);
+          return matchesGroup && matchesColor;
+        });
+        const activeIn = city.incoming.filter(r => {
+          const matchesGroup = !hasGroupFilter || (activeGroupsSet && activeGroupsSet.has(r.grupo));
+          const matchesColor = !hasColorFilter || this.isRouteInActiveBands(r);
+          return matchesGroup && matchesColor;
+        });
+        displayCount = activeOut.length + activeIn.length;
+        if (displayCount > 0) {
+          isVisible = true;
+          const firstRoute = activeOut[0] || activeIn[0];
+          primaryColor = this.getColorForRoute(firstRoute);
+        }
+      }
 
-      const icon = this.createCityIcon(city.name, activeCount, primaryColor);
+      const icon = this.createCityIcon(city.name, displayCount, primaryColor);
       const marker = L.marker([city.lat, city.lon], { icon });
 
       marker.bindPopup(() => this.buildCityPopupHtml(city, activeGroupsSet), {
@@ -830,7 +899,7 @@ class RoutesMap {
         className: 'custom-city-leaflet-popup'
       });
 
-      marker.bindTooltip(`📍 ${city.name}`, {
+      marker.bindTooltip(`📍 ${city.name} (${displayCount} conexiones)`, {
         direction: 'top',
         offset: [0, -14]
       });
@@ -853,7 +922,7 @@ class RoutesMap {
       this.updateHeatmapLayer();
     }
 
-    // Fit map bounds
+    // Fit map bounds to encompass all visible nodes/cities
     if (bounds.isValid()) {
       this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 });
     }
@@ -867,12 +936,19 @@ class RoutesMap {
   filterByGroups(activeGroupsSet) {
     const bounds = L.latLngBounds([]);
     let visibleRoutesCount = 0;
+    
+    const hasGroupFilter = Boolean(activeGroupsSet && activeGroupsSet.size > 0);
+    const hasColorFilter = Boolean(this.activeBands && this.activeBands.size > 0);
+    const hasAnyFilter = hasGroupFilter || hasColorFilter;
 
     // 1. Update Route Polylines & Distance Marks
     this.routeLayers.forEach(item => {
-      const inGroup = activeGroupsSet.has(item.grupo);
-      const inBand = this.activeBandIndex === null || item.band.index === this.activeBandIndex;
-      const shouldShow = inGroup && inBand;
+      let shouldShow = false;
+      if (hasAnyFilter) {
+        const matchesGroup = !hasGroupFilter || activeGroupsSet.has(item.grupo);
+        const matchesColor = !hasColorFilter || this.isRouteInActiveBands(item.route);
+        shouldShow = matchesGroup && matchesColor;
+      }
       item.isVisible = shouldShow;
 
       if (shouldShow) {
@@ -898,28 +974,50 @@ class RoutesMap {
     // 2. Update Deduplicated City Markers
     this.cityMarkers.forEach(cityItem => {
       const city = cityItem.cityData;
-      const activeOut = city.outgoing.filter(r => activeGroupsSet.has(r.grupo) && (this.activeBandIndex === null || this.getBandForTotal(r.total_packages).index === this.activeBandIndex));
-      const activeIn = city.incoming.filter(r => activeGroupsSet.has(r.grupo) && (this.activeBandIndex === null || this.getBandForTotal(r.total_packages).index === this.activeBandIndex));
-      const activeCount = activeOut.length + activeIn.length;
-      const shouldShow = activeCount > 0;
 
-      cityItem.isVisible = shouldShow;
-
-      if (shouldShow) {
-        const firstRoute = activeOut[0] || activeIn[0];
-        const primaryColor = firstRoute ? this.getColorForRoute(firstRoute) : cityItem.primaryColor;
-        const newIcon = this.createCityIcon(city.name, activeCount, primaryColor);
-        cityItem.marker.setIcon(newIcon);
-
-        cityItem.marker.setTooltipContent(`📍 ${city.name}`);
-
+      if (!hasAnyFilter) {
+        // App start / no filters: all cities visible
+        cityItem.isVisible = true;
+        const totalConn = city.outgoing.length + city.incoming.length;
+        const icon = this.createCityIcon(city.name, totalConn, '#6366F1');
+        cityItem.marker.setIcon(icon);
+        cityItem.marker.setTooltipContent(`📍 ${city.name} (${totalConn} conexiones)`);
         if (!this.map.hasLayer(cityItem.marker)) {
           cityItem.marker.addTo(this.map);
         }
         bounds.extend([city.lat, city.lon]);
       } else {
-        if (this.map.hasLayer(cityItem.marker)) {
-          this.map.removeLayer(cityItem.marker);
+        // Filter is active: only cities involved in active routes must be displayed!
+        const activeOut = city.outgoing.filter(r => {
+          const matchesGroup = !hasGroupFilter || activeGroupsSet.has(r.grupo);
+          const matchesColor = !hasColorFilter || this.isRouteInActiveBands(r);
+          return matchesGroup && matchesColor;
+        });
+        const activeIn = city.incoming.filter(r => {
+          const matchesGroup = !hasGroupFilter || activeGroupsSet.has(r.grupo);
+          const matchesColor = !hasColorFilter || this.isRouteInActiveBands(r);
+          return matchesGroup && matchesColor;
+        });
+        const activeCount = activeOut.length + activeIn.length;
+
+        if (activeCount > 0) {
+          // Involved city: display on map
+          cityItem.isVisible = true;
+          const firstRoute = activeOut[0] || activeIn[0];
+          const primaryColor = this.getColorForRoute(firstRoute);
+          const newIcon = this.createCityIcon(city.name, activeCount, primaryColor);
+          cityItem.marker.setIcon(newIcon);
+          cityItem.marker.setTooltipContent(`📍 ${city.name} (${activeCount} conexiones activas)`);
+          if (!this.map.hasLayer(cityItem.marker)) {
+            cityItem.marker.addTo(this.map);
+          }
+          bounds.extend([city.lat, city.lon]);
+        } else {
+          // City not involved: DO NOT DISPLAY
+          cityItem.isVisible = false;
+          if (this.map.hasLayer(cityItem.marker)) {
+            this.map.removeLayer(cityItem.marker);
+          }
         }
       }
     });
@@ -935,76 +1033,141 @@ class RoutesMap {
     return visibleRoutesCount;
   }
 
+  /**
+   * Toggle a specific color band (0..4 or 'custom') in the multi-color selection.
+   */
+  toggleBand(bandId, activeGroupsSet = null, fitMap = false) {
+    if (this.activeBands.has(bandId)) {
+      this.activeBands.delete(bandId);
+    } else {
+      this.activeBands.add(bandId);
+    }
+    this.activeBandIndex = this.activeBands.size === 1 ? Array.from(this.activeBands)[0] : null;
+    return this.applyColorAndGroupFilters(activeGroupsSet, fitMap);
+  }
+
+  /**
+   * Select ONLY one band (exclusive color select).
+   */
+  selectSingleBand(bandId, activeGroupsSet = null, fitMap = false) {
+    if (this.activeBands.size === 1 && this.activeBands.has(bandId)) {
+      this.activeBands.clear();
+    } else {
+      this.activeBands.clear();
+      this.activeBands.add(bandId);
+    }
+    this.activeBandIndex = this.activeBands.size === 1 ? Array.from(this.activeBands)[0] : null;
+    return this.applyColorAndGroupFilters(activeGroupsSet, fitMap);
+  }
+
+  /**
+   * Select all colors / clear color filter (all visible).
+   */
+  selectAllBands(activeGroupsSet = null) {
+    this.activeBands.clear();
+    this.activeBandIndex = null;
+    return this.applyColorAndGroupFilters(activeGroupsSet, false);
+  }
+
+  /**
+   * Legacy filterByBand wrapper for backward compatibility.
+   */
   filterByBand(bandIndex, activeGroupsSet = null, fitMap = true) {
-    this.activeBandIndex = (this.activeBandIndex === bandIndex) ? null : bandIndex;
-    const bounds = L.latLngBounds([]);
-    let visibleCount = 0;
+    return this.toggleBand(bandIndex, activeGroupsSet, fitMap);
+  }
 
+  /**
+   * Sets custom limits for color bands { b1, b2, b4 } and updates map layers.
+   */
+  setCustomBandLimits(limits, routes, activeGroupsSet) {
+    this.customBandLimits = {
+      b1: Math.max(1, Number(limits.b1)),
+      b2: Math.max(Number(limits.b1) + 1, Number(limits.b2)),
+      b4: Math.max(Number(limits.b2) + 1, Number(limits.b4))
+    };
+    this.computeTotalBands(routes);
+    this.refreshRouteLayerStyles();
+    return this.filterByGroups(activeGroupsSet);
+  }
+
+  /**
+   * Resets color limits to auto-calculated quantile values.
+   */
+  resetBandLimitsToAuto(routes, activeGroupsSet) {
+    this.customBandLimits = null;
+    this.computeTotalBands(routes);
+    this.refreshRouteLayerStyles();
+    return this.filterByGroups(activeGroupsSet);
+  }
+
+  /**
+   * Sets custom range filter (e.g. Min 10, Max 80 packages).
+   */
+  setCustomCategoryRange(min, max, routes, activeGroupsSet) {
+    this.customFilterCategory.min = Math.max(0, Number(min));
+    this.customFilterCategory.max = Math.max(this.customFilterCategory.min, Number(max));
+    if (routes) {
+      this.customFilterCategory.count = routes.filter(r => {
+        const pkgs = Number(r.total_packages || 0);
+        return pkgs >= this.customFilterCategory.min && pkgs <= this.customFilterCategory.max;
+      }).length;
+    }
+    return this.filterByGroups(activeGroupsSet);
+  }
+
+  /**
+   * Re-evaluates color mode and polyline style for all route layers when limits change.
+   */
+  refreshRouteLayerStyles() {
     this.routeLayers.forEach(item => {
-      const inGroup = !activeGroupsSet || activeGroupsSet.has(item.grupo);
-      const inBand = this.activeBandIndex === null || item.band.index === this.activeBandIndex;
-      const shouldShow = inGroup && inBand;
-      item.isVisible = shouldShow;
-
-      if (shouldShow) {
-        if (!this.map.hasLayer(item.polyline)) item.polyline.addTo(this.map);
-        if (this.showValues && item.valMarker && !this.map.hasLayer(item.valMarker)) {
-          item.valMarker.addTo(this.map);
+      const band = this.getBandForTotal(item.route.total_packages || 0);
+      item.band = band;
+      if (this.colorMode === 'total' && this.selectedRouteId !== item.id) {
+        item.polyline.setStyle({ color: band.color });
+        if (item.valMarker) {
+          const el = item.valMarker.getElement();
+          if (el) {
+            const badge = el.querySelector('.trajectory-val-badge');
+            if (badge) badge.style.borderColor = band.color;
+            const dot = el.querySelector('.trajectory-band-dot');
+            if (dot) dot.style.backgroundColor = band.color;
+          }
         }
-        bounds.extend([item.route.lat1, item.route.lon1]);
-        bounds.extend([item.route.lat2, item.route.lon2]);
-        visibleCount++;
-      } else {
-        if (this.map.hasLayer(item.polyline)) this.map.removeLayer(item.polyline);
-        if (item.valMarker && this.map.hasLayer(item.valMarker)) this.map.removeLayer(item.valMarker);
       }
     });
+  }
 
-    // Update cities: only show cities connected to currently visible routes
-    this.cityMarkers.forEach(cityItem => {
-      const city = cityItem.cityData;
-      const activeOut = city.outgoing.filter(r => (!activeGroupsSet || activeGroupsSet.has(r.grupo)) && (this.activeBandIndex === null || this.getBandForTotal(Number(r.total_packages || 0)).index === this.activeBandIndex));
-      const activeIn = city.incoming.filter(r => (!activeGroupsSet || activeGroupsSet.has(r.grupo)) && (this.activeBandIndex === null || this.getBandForTotal(Number(r.total_packages || 0)).index === this.activeBandIndex));
-      const count = activeOut.length + activeIn.length;
-      cityItem.isVisible = count > 0;
-
-      if (count > 0) {
-        const firstRoute = activeOut[0] || activeIn[0];
-        const primaryColor = firstRoute ? this.getColorForRoute(firstRoute) : cityItem.primaryColor;
-        cityItem.marker.setIcon(this.createCityIcon(city.name, count, primaryColor));
-        if (!this.map.hasLayer(cityItem.marker)) cityItem.marker.addTo(this.map);
-        bounds.extend([city.lat, city.lon]);
-      } else {
-        if (this.map.hasLayer(cityItem.marker)) this.map.removeLayer(cityItem.marker);
-      }
-    });
-
-    if (this.showHeatmap) {
-      this.updateHeatmapLayer();
+  applyColorAndGroupFilters(activeGroupsSet, fitMap = false) {
+    const visibleCount = this.filterByGroups(activeGroupsSet);
+    if (fitMap) {
+      this.fitVisible();
     }
-
-    if (this.showValues) {
-      setTimeout(() => this.resolveTagCollisions(), 60);
-    }
-
-    if (fitMap && bounds.isValid()) {
-      this.map.flyToBounds(bounds, { padding: [70, 70], maxZoom: 10, duration: 0.75 });
-    }
-
-    const currentBand = (this.activeBandIndex !== null && this.totalBands) ? this.totalBands[this.activeBandIndex] : null;
-    return { visibleCount, activeBandIndex: this.activeBandIndex, band: currentBand };
+    return {
+      visibleCount,
+      activeBands: Array.from(this.activeBands),
+      totalBands: this.totalBands
+    };
   }
 
   fitVisible() {
     const bounds = L.latLngBounds([]);
+    let hasVisible = false;
     this.routeLayers.forEach(item => {
       if (item.isVisible) {
         bounds.extend([item.route.lat1, item.route.lon1]);
         bounds.extend([item.route.lat2, item.route.lon2]);
+        hasVisible = true;
       }
     });
+    if (!hasVisible) {
+      this.cityMarkers.forEach(item => {
+        if (item.isVisible) {
+          bounds.extend([item.cityData.lat, item.cityData.lon]);
+        }
+      });
+    }
     if (bounds.isValid()) {
-      this.map.fitBounds(bounds, { padding: [60, 60], maxZoom: 11 });
+      this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 });
     }
   }
 

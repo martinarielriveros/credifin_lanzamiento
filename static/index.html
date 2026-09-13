@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="/static/css/style.css?v=10">
+  <link rel="stylesheet" href="/static/css/style.css?v=16">
 </head>
 <body>
 
@@ -86,6 +86,11 @@
         <button id="btn-clear-routes" class="btn btn-danger-ghost" title="Limpiar todas las rutas cargadas">
           <i class="fa-solid fa-trash-can"></i>
         </button>
+        <button id="btn-hamburger" class="btn-hamburger" aria-label="Abrir filtros" title="Abrir Filtros">
+          <span class="hamburger-icon"><i class="fa-solid fa-bars"></i></span>
+          <span class="hamburger-text">Filtros</span>
+          <span class="hamburger-badge" id="hamburger-badge">0</span>
+        </button>
       </div>
     </header>
 
@@ -137,11 +142,11 @@
         <span class="drag-grip-icon toolbar-drag" title="Arrastrar"><i class="fa-solid fa-grip-vertical"></i></span>
 
         <div class="map-controls-content">
-          <!-- Toggle Trajectory Values (Bultos) Mark -->
-          <button id="btn-toggle-values" class="control-toggle-btn active" title="Mostrar / Ocultar etiquetas de totales y bultos en cada trayectoria">
+          <!-- Toggle Trajectory Values (Bultos) Mark (Starts OFF by default) -->
+          <button id="btn-toggle-values" class="control-toggle-btn" title="Mostrar / Ocultar etiquetas de totales y bultos en cada trayectoria">
             <i class="fa-solid fa-tags"></i>
             <span>Totales</span>
-            <span class="toggle-pill-status">ON</span>
+            <span class="toggle-pill-status off">OFF</span>
           </button>
 
           <!-- Toggle Heat Map Layer -->
@@ -242,6 +247,273 @@
           </div>
         </div>
       </div>
+
+      <!-- Hamburger Menu Backdrop & Slide-out Drawer -->
+      <div class="hamburger-backdrop" id="hamburger-backdrop"></div>
+      <aside class="hamburger-drawer" id="hamburger-drawer" aria-hidden="true">
+        <div class="drawer-header-mobile">
+          <div class="drawer-title-wrap">
+            <div class="drawer-icon"><i class="fa-solid fa-sliders"></i></div>
+            <div>
+              <h2 class="drawer-title">Filtros y Rutas</h2>
+              <span class="drawer-subtitle" id="drawer-filter-status">0 de 0 grupos seleccionados</span>
+            </div>
+          </div>
+          <button id="btn-close-hamburger" class="drawer-close-icon" aria-label="Cerrar">&times;</button>
+        </div>
+
+        <!-- Drawer Navigation Tabs -->
+        <nav class="drawer-tabs" id="drawer-tabs">
+          <button class="drawer-tab-btn active" data-tab="tab-groups">
+            <i class="fa-solid fa-layer-group"></i> <span>Grupos</span>
+          </button>
+          <button class="drawer-tab-btn" data-tab="tab-colors">
+            <i class="fa-solid fa-palette"></i> <span>Colores</span>
+          </button>
+          <button class="drawer-tab-btn" data-tab="tab-layers">
+            <i class="fa-solid fa-sliders"></i> <span>Capas</span>
+          </button>
+          <button class="drawer-tab-btn" data-tab="tab-explorer">
+            <i class="fa-solid fa-compass"></i> <span>Rutas</span>
+          </button>
+          <button class="drawer-tab-btn" data-tab="tab-tools">
+            <i class="fa-solid fa-gear"></i> <span>Más</span>
+          </button>
+        </nav>
+
+        <!-- Drawer Tab Contents -->
+        <div class="drawer-content-scroll">
+          
+          <!-- TAB 1: GRUPOS -->
+          <section class="drawer-tab-pane active" id="tab-groups">
+            <div class="pane-toolbar">
+              <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="drawer-group-search" placeholder="Buscar grupo..." autocomplete="off">
+              </div>
+              <div class="pane-quick-actions">
+                <button id="btn-drawer-select-all-groups" class="btn-micro primary" title="Seleccionar todos los grupos">Todos</button>
+                <button id="btn-drawer-clear-groups" class="btn-micro" title="Deseleccionar todos">Ninguno</button>
+                <button id="btn-drawer-fit" class="btn-micro" title="Centrar mapa en rutas visibles">
+                  <i class="fa-solid fa-expand"></i> Centrar
+                </button>
+              </div>
+            </div>
+
+            <div class="drawer-group-list" id="drawer-group-list">
+              <!-- Rendered dynamically -->
+            </div>
+          </section>
+
+          <!-- TAB 2: COLORES / CATEGORÍAS DE BULTOS -->
+          <section class="drawer-tab-pane" id="tab-colors">
+            <div class="pane-toolbar">
+              <div class="pane-quick-actions">
+                <button id="btn-drawer-select-all-colors" class="btn-micro primary" title="Mostrar todas las rutas">Todos</button>
+                <button id="btn-drawer-clear-colors" class="btn-micro" title="Limpiar filtro de colores">Restablecer</button>
+              </div>
+            </div>
+
+            <div class="pane-info-banner" id="drawer-color-banner" style="display:none;">
+              <span class="banner-dot" id="drawer-banner-dot"></span>
+              <span id="drawer-banner-text">Filtro de color activo</span>
+              <button id="btn-drawer-clear-band" class="banner-clear-btn">&times; Todos</button>
+            </div>
+
+            <p class="section-desc">Selecciona uno o varios colores para filtrar rutas:</p>
+            <div class="drawer-band-list" id="drawer-band-list">
+              <!-- Rendered dynamically -->
+            </div>
+
+            <!-- Categoría de Filtro Personalizado -->
+            <div class="drawer-custom-category-box" id="drawer-custom-category-box">
+              <div class="custom-cat-header">
+                <div class="custom-cat-title-wrap">
+                  <input type="checkbox" id="check-custom-cat" class="drawer-color-check" style="accent-color: #A855F7;">
+                  <span class="legend-band-chip" style="background-color: #A855F7;"></span>
+                  <div>
+                    <span class="custom-cat-title">Personalizado</span>
+                    <span class="custom-cat-sub">Rango a medida</span>
+                  </div>
+                </div>
+                <span class="legend-band-count" id="custom-cat-count">0</span>
+              </div>
+              <div class="custom-cat-inputs-row">
+                <div class="custom-input-group">
+                  <span class="input-tag">Mín:</span>
+                  <input type="number" id="custom-cat-min" min="0" value="10" class="cat-num-input" placeholder="0">
+                </div>
+                <div class="custom-input-group">
+                  <span class="input-tag">Máx:</span>
+                  <input type="number" id="custom-cat-max" min="0" value="100" class="cat-num-input" placeholder="100">
+                </div>
+                <button id="btn-apply-custom-cat" class="btn-micro primary" title="Aplicar rango personalizado">Aplicar</button>
+              </div>
+            </div>
+
+            <!-- Editor de Límites de Categorías -->
+            <div class="drawer-limits-editor-box">
+              <button class="limits-editor-toggle-btn" id="btn-toggle-limits-editor" type="button">
+                <div class="limits-toggle-left">
+                  <i class="fa-solid fa-sliders"></i>
+                  <span>Ajustar Límites de Categorías</span>
+                </div>
+                <i class="fa-solid fa-chevron-down limits-arrow" id="limits-arrow"></i>
+              </button>
+              <div class="limits-editor-panel" id="limits-editor-panel" style="display:none;">
+                <p class="limits-hint">Modifica los umbrales máximos para redefinir las categorías:</p>
+                <div class="limits-grid">
+                  <div class="limit-input-row">
+                    <span class="legend-band-chip" style="background-color: #10B981;"></span>
+                    <span class="limit-label">Bajo (Máx):</span>
+                    <input type="number" id="limit-val-b1" min="1" class="limit-box-input">
+                  </div>
+                  <div class="limit-input-row">
+                    <span class="legend-band-chip" style="background-color: #FACC15;"></span>
+                    <span class="limit-label">Medio (Máx):</span>
+                    <input type="number" id="limit-val-b2" min="2" class="limit-box-input">
+                  </div>
+                  <div class="limit-input-row">
+                    <span class="legend-band-chip" style="background-color: #F97316;"></span>
+                    <span class="limit-label">Alto (Máx):</span>
+                    <input type="number" id="limit-val-b4" min="3" class="limit-box-input">
+                  </div>
+                  <div class="limit-info-row">
+                    <span class="legend-band-chip" style="background-color: #EF4444;"></span>
+                    <span class="limit-label">Muy Alto:</span>
+                    <span class="limit-info-text" id="limit-critico-label">Desde Alto + 1</span>
+                  </div>
+                </div>
+                <div class="limits-actions-row">
+                  <button id="btn-save-limits" class="btn-micro primary">Aplicar Límites</button>
+                  <button id="btn-reset-limits" class="btn-micro">Auto-calcular</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- TAB 3: CAPAS Y VISUALIZACIÓN -->
+          <section class="drawer-tab-pane" id="tab-layers">
+            <div class="control-row">
+              <div class="control-row-info">
+                <div class="control-row-title"><i class="fa-solid fa-tags"></i> Etiquetas de Totales</div>
+                <div class="control-row-desc">Muestra el total de bultos sobre las rutas</div>
+              </div>
+              <button id="btn-drawer-toggle-values" class="switch-btn" title="Alternar etiquetas">
+                <span class="switch-thumb"></span>
+              </button>
+            </div>
+
+            <div class="control-row">
+              <div class="control-row-info">
+                <div class="control-row-title"><i class="fa-solid fa-fire-flame-curved"></i> Mapa de Calor</div>
+                <div class="control-row-desc">Densidad continua de concentración de carga</div>
+              </div>
+              <button id="btn-drawer-toggle-heatmap" class="switch-btn" title="Alternar mapa de calor">
+                <span class="switch-thumb"></span>
+              </button>
+            </div>
+
+            <div class="control-row">
+              <div class="control-row-info">
+                <div class="control-row-title"><i class="fa-solid fa-palette"></i> Modo de Coloreado</div>
+                <div class="control-row-desc" id="drawer-colormode-desc">Por Total de Bultos (5 Bandas)</div>
+              </div>
+              <button id="btn-drawer-toggle-colormode" class="btn-micro" style="padding: 6px 12px;">Alternar</button>
+            </div>
+
+            <div class="control-section-header">
+              <span>Estilo de Mapa Base</span>
+            </div>
+            <div class="drawer-style-switcher">
+              <button class="drawer-style-tile active" data-style="dark">
+                <i class="fa-solid fa-moon"></i>
+                <span>Oscuro</span>
+              </button>
+              <button class="drawer-style-tile" data-style="voyager">
+                <i class="fa-solid fa-sun"></i>
+                <span>Calles Esri</span>
+              </button>
+              <button class="drawer-style-tile" data-style="osm">
+                <i class="fa-solid fa-map"></i>
+                <span>OSM</span>
+              </button>
+              <button class="drawer-style-tile" data-style="satellite">
+                <i class="fa-solid fa-earth-americas"></i>
+                <span>Satélite</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- TAB 4: EXPLORADOR DE RUTAS -->
+          <section class="drawer-tab-pane" id="tab-explorer">
+            <div class="search-wrap" style="margin-bottom: 12px;">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" id="drawer-route-search" placeholder="Buscar por ciudad o provincia...">
+            </div>
+            <div class="drawer-route-count">
+              <span id="drawer-routes-summary">0 rutas visibles</span>
+            </div>
+            <div class="drawer-route-list" id="drawer-route-list">
+              <!-- Rendered dynamically -->
+            </div>
+          </section>
+
+          <!-- TAB 5: ACCIONES Y HERRAMIENTAS -->
+          <section class="drawer-tab-pane" id="tab-tools">
+            <div class="drawer-stats-grid">
+              <div class="drawer-stat-card">
+                <span class="stat-num" id="dstat-routes">0</span>
+                <span class="stat-lbl">Rutas</span>
+              </div>
+              <div class="drawer-stat-card">
+                <span class="stat-num" id="dstat-packages">0</span>
+                <span class="stat-lbl">Bultos</span>
+              </div>
+              <div class="drawer-stat-card">
+                <span class="stat-num" id="dstat-groups">0</span>
+                <span class="stat-lbl">Grupos</span>
+              </div>
+              <div class="drawer-stat-card">
+                <span class="stat-num" id="dstat-cities">0</span>
+                <span class="stat-lbl">Ciudades</span>
+              </div>
+            </div>
+
+            <div class="drawer-actions-list">
+              <button id="btn-drawer-sync" class="drawer-action-btn primary">
+                <i class="fa-solid fa-rotate"></i>
+                <span>Sincronizar Google Sheet</span>
+              </button>
+              <button id="btn-drawer-upload" class="drawer-action-btn">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span>Subir Archivo CSV</span>
+              </button>
+              <button id="btn-drawer-sample" class="drawer-action-btn">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <span>Cargar Rutas de Ejemplo</span>
+              </button>
+              <a href="/api/download-template" class="drawer-action-btn">
+                <i class="fa-solid fa-file-csv"></i>
+                <span>Descargar Plantilla Oficial</span>
+              </a>
+              <button id="btn-drawer-clear" class="drawer-action-btn danger">
+                <i class="fa-solid fa-trash-can"></i>
+                <span>Limpiar Base de Datos</span>
+              </button>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- Sticky Drawer Footer -->
+        <div class="drawer-footer">
+          <button id="btn-drawer-apply-view" class="btn-drawer-apply">
+            <i class="fa-solid fa-map-location-dot"></i>
+            <span>Ver en el Mapa</span>
+          </button>
+        </div>
+      </aside>
     </main>
   </div>
 
@@ -320,8 +592,8 @@
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   
   <!-- App Scripts -->
-  <script src="/static/js/api.js?v=10"></script>
-  <script src="/static/js/map.js?v=10"></script>
-  <script src="/static/js/app.js?v=10"></script>
+  <script src="/static/js/api.js?v=16"></script>
+  <script src="/static/js/map.js?v=16"></script>
+  <script src="/static/js/app.js?v=16"></script>
 </body>
 </html>
